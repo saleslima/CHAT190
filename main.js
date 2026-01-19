@@ -26,6 +26,9 @@ const supervisorsRegistry = new Map(); // key: pa, value: { name, pa }
 const SUPERVISOR_PASSWORD = "superv190cop";
 let lastIncomingAttendantPA = null;
 
+const STORAGE_KEY_MESSAGES = "chatMessages";
+let messagesHistory = [];
+
 /**
  * Registra um atendente logado na lista global.
  */
@@ -47,7 +50,7 @@ function registerSupervisor(name, pa) {
 
 /**
  * Popula o combo de destinos da supervisão com a lista de atendentes logados.
- * A opção "Todos atendentes" foi removida.
+ * Inclui a opção "Todos atendentes" para enviar para todos os logados.
  */
 function populateSupervisorTargets() {
   if (!supervisorControls || !targetSelect) return;
@@ -56,6 +59,13 @@ function populateSupervisorTargets() {
 
   targetSelect.innerHTML = "";
 
+  // Opção para enviar para todos os atendentes logados
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = "Todos atendentes";
+  targetSelect.appendChild(allOption);
+
+  // Opções individuais para cada atendente logado
   attendantsRegistry.forEach((att, pa) => {
     const option = document.createElement("option");
     option.value = pa;
@@ -66,8 +76,10 @@ function populateSupervisorTargets() {
   // Tenta manter a seleção anterior, ou selecionar o último atendente que enviou mensagem
   if (lastIncomingAttendantPA && attendantsRegistry.has(lastIncomingAttendantPA)) {
     targetSelect.value = lastIncomingAttendantPA;
-  } else if (previouslySelected && attendantsRegistry.has(previouslySelected)) {
+  } else if (previouslySelected && (previouslySelected === "all" || attendantsRegistry.has(previouslySelected))) {
     targetSelect.value = previouslySelected;
+  } else {
+    targetSelect.value = "all";
   }
 }
 
@@ -150,8 +162,13 @@ async function autoFillPA() {
   }
 }
 
-// Cria uma mensagem na interface
-function appendMessage({ text, imageURL, type, metaLabel }) {
+ // Cria uma mensagem na interface
+function appendMessage(message, options = {}) {
+  const { text, imageURL, type, metaLabel, timestamp } = message;
+  const { save = true } = options;
+
+  const usedTimestamp = timestamp || new Date().toISOString();
+
   const row = document.createElement("div");
   row.className = `message-row ${type}`;
 
@@ -174,10 +191,8 @@ function appendMessage({ text, imageURL, type, metaLabel }) {
 
   const meta = document.createElement("div");
   meta.className = "message-meta";
-  const now = new Date();
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mm = String(now.getMinutes()).padStart(2, "0");
-  meta.textContent = `${metaLabel ? metaLabel + " • " : ""}${hh}:${mm}`;
+  const timeLabel = formatTime(usedTimestamp);
+  meta.textContent = `${metaLabel ? metaLabel + " • " : ""}${timeLabel}`;
   bubble.appendChild(meta);
 
   row.appendChild(bubble);
@@ -186,8 +201,58 @@ function appendMessage({ text, imageURL, type, metaLabel }) {
   // Rolagem para ver a última mensagem
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
+  // Persiste a mensagem no histórico/localStorage, se necessário
+  if (save) {
+    const storedMessage = {
+      text: text || null,
+      imageURL: imageURL || null,
+      type: type || "received",
+      metaLabel: metaLabel || "",
+      timestamp: usedTimestamp
+    };
+    messagesHistory.push(storedMessage);
+    saveMessages();
+  }
+
   // Ao receber uma mensagem, colocar o chat em primeiro plano
   bringChatToFront();
+}
+
+function formatTime(timestamp) {
+  try {
+    const date = timestamp ? new Date(timestamp) : new Date();
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  } catch {
+    return "";
+  }
+}
+
+function loadMessages() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_MESSAGES);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    messagesHistory = parsed;
+    parsed.forEach((msg) => {
+      appendMessage(msg, { save: false });
+    });
+  } catch (e) {
+    console.error("Erro ao carregar mensagens:", e);
+  }
+}
+
+function saveMessages() {
+  try {
+    localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messagesHistory));
+  } catch (e) {
+    console.error("Erro ao salvar mensagens:", e);
+  }
 }
 
  // Simula uma resposta do sistema para mostrar "mensagem recebida"
@@ -222,7 +287,9 @@ messageForm.addEventListener("submit", (event) => {
 
   if (role === "supervisao") {
     const targetValue = targetSelect.value;
-    if (targetValue && attendantsRegistry.has(targetValue)) {
+    if (targetValue === "all") {
+      metaLabel = "Você → Todos atendentes";
+    } else if (targetValue && attendantsRegistry.has(targetValue)) {
       const att = attendantsRegistry.get(targetValue);
       metaLabel = `Você → ${att.name} (P.A ${att.pa})`;
     } else {
@@ -330,6 +397,7 @@ function init() {
   bringChatToFront();
   autoFillPA();
   applyRoleUI();
+  loadMessages();
 }
 
 init();

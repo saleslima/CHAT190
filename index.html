@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="root">
+    <!-- Conteúdo de fundo apenas para mostrar sobreposição -->
+    <div class="background-content">
+      <div class="background-panel">
+        <p class="bg-title">Área de Trabalho</p>
+        <p class="bg-subtitle">O chat aparecerá automaticamente em primeiro plano ao receber mensagens.</p>
+      </div>
+    </div>
+
+    <!-- Overlay do chat que fica em primeiro plano -->
+    <div id="chat-overlay" class="chat-overlay hidden">
+      <div class="chat-window">
+        <header class="chat-header">
+          <div class="chat-title-group">
+            <span class="chat-title">Atendimento</span>
+            <span class="chat-user-label" id="chatUserLabel"></span>
+          </div>
+          <button id="chatMinimizeBtn" class="icon-btn" aria-label="Minimizar chat">−</button>
+        </header>
+
+        <div id="userSetup" class="user-setup">
+          <div class="setup-section">
+            <label class="field-label" for="userPA">P.A</label>
+            <input id="userPA" type="text" class="text-input" readonly />
+            <p class="field-hint">Preenchido automaticamente pelos 3 últimos dígitos do seu IP.</p>
+          </div>
+
+          <div class="setup-section">
+            <span class="field-label">Perfil</span>
+            <div class="profile-list">
+              <button type="button" class="profile-item" data-role="atendente">Atendente</button>
+              <button type="button" class="profile-item" data-role="supervisao">Supervisão</button>
+            </div>
+          </div>
+
+          <div id="detailsSection" class="details-section hidden">
+            <div class="setup-section">
+              <label class="field-label" for="userName">Nome</label>
+              <input
+                id="userName"
+                type="text"
+                class="text-input"
+                placeholder="Digite seu nome"
+                autocomplete="name"
+              />
+            </div>
+
+            <div class="setup-section supervisor-password hidden" id="supervisorPasswordSection">
+              <label class="field-label" for="supervisorPassword">Senha de supervisão</label>
+              <input
+                id="supervisorPassword"
+                type="password"
+                class="text-input"
+                placeholder="Digite a senha de supervisão"
+                autocomplete="off"
+              />
+            </div>
+
+            <button id="startChatBtn" class="primary-btn">Entrar no chat</button>
+          </div>
+        </div>
+
+        <div id="chatContent" class="chat-content hidden">
+          <div id="supervisorControls" class="supervisor-controls hidden">
+            <label class="field-label" for="targetSelect">Enviar para</label>
+            <select id="targetSelect" class="select-input"></select>
+          </div>
+          <div id="messagesContainer" class="messages-container"></div>
+
+          <form id="messageForm" class="message-form">
+            <label class="image-input-label">
+              <input id="imageInput" type="file" accept="image/*" class="image-input" />
+              📷
+            </label>
+            <input
+              id="messageInput"
+              type="text"
+              class="message-input"
+              placeholder="Digite uma mensagem"
+              autocomplete="off"
+            />
+            <button type="submit" class="send-btn">Enviar</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Botão flutuante para reabrir o chat quando minimizado -->
+    <button id="floatingChatBtn" class="floating-chat-btn hidden" aria-label="Abrir chat">
+      Chat
+    </button>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

@@ -27,7 +27,9 @@ const SUPERVISOR_PASSWORD = "superv190cop";
 let lastIncomingAttendantPA = null;
 
 const STORAGE_KEY_MESSAGES = "chatMessages";
+const STORAGE_KEY_OUTGOING = "chatOutgoingMessages";
 let messagesHistory = [];
+let messageIdCounter = Date.now();
 
 /**
  * Registra um atendente logado na lista global.
@@ -255,17 +257,7 @@ function saveMessages() {
   }
 }
 
- // Simula uma resposta do sistema para mostrar "mensagem recebida"
-function simulateReply() {
-  setTimeout(() => {
-    appendMessage({
-      text: "Mensagem recebida.",
-      imageURL: null,
-      type: "received",
-      metaLabel: "Sistema"
-    });
-  }, 600);
-}
+
 
  // Envio de mensagem
 messageForm.addEventListener("submit", (event) => {
@@ -284,23 +276,30 @@ messageForm.addEventListener("submit", (event) => {
 
   const role = currentUser?.role || getSelectedRole();
   let metaLabel = "";
+  let toRole = "";
+  let toPA = "";
 
   if (role === "supervisao") {
     const targetValue = targetSelect.value;
     if (targetValue === "all") {
       metaLabel = "Você → Todos atendentes";
+      toRole = "atendente";
+      toPA = "all";
     } else if (targetValue && attendantsRegistry.has(targetValue)) {
       const att = attendantsRegistry.get(targetValue);
       metaLabel = `Você → ${att.name} (P.A ${att.pa})`;
+      toRole = "atendente";
+      toPA = att.pa;
     } else {
       metaLabel = "Você → Atendente";
+      toRole = "atendente";
+      toPA = "all";
     }
   } else {
     // Atendente envia para supervisão; mensagem será recebida por todos supervisores logados
     metaLabel = "Você → Supervisão";
-    if (currentUser?.pa) {
-      markLastIncomingFromAttendant(currentUser.pa);
-    }
+    toRole = "supervisao";
+    toPA = "all";
   }
 
   appendMessage({
@@ -310,12 +309,20 @@ messageForm.addEventListener("submit", (event) => {
     metaLabel
   });
 
+  // Send message to other tabs
+  sendMessageToOtherTabs({
+    fromRole: role,
+    fromPA: currentUser.pa,
+    fromName: currentUser.name,
+    toRole,
+    toPA,
+    text,
+    imageURL
+  });
+
   // Limpa campos
   messageInput.value = "";
   imageInput.value = "";
-
-  // Simula mensagem recebida para que a janela suba em primeiro plano
-  simulateReply();
 });
 
 profileItems.forEach((btn) => {
@@ -398,6 +405,90 @@ function init() {
   autoFillPA();
   applyRoleUI();
   loadMessages();
+  setupStorageListener();
+}
+
+// Listen for messages from other tabs
+function setupStorageListener() {
+  window.addEventListener("storage", (e) => {
+    if (e.key === STORAGE_KEY_OUTGOING && e.newValue) {
+      try {
+        const message = JSON.parse(e.newValue);
+        handleIncomingMessage(message);
+      } catch (err) {
+        console.error("Error parsing incoming message:", err);
+      }
+    }
+  });
+}
+
+// Handle incoming messages from other tabs
+function handleIncomingMessage(message) {
+  if (!currentUser) return;
+
+  const { fromRole, fromPA, fromName, toRole, toPA, text, imageURL, timestamp, id } = message;
+
+  // Skip if this is our own message
+  if (fromPA === currentUser.pa && fromRole === currentUser.role) {
+    return;
+  }
+
+  let shouldReceive = false;
+  let metaLabel = "";
+
+  if (currentUser.role === "supervisao") {
+    // Supervisors receive messages from attendants
+    if (fromRole === "atendente") {
+      shouldReceive = true;
+      metaLabel = `${fromName} (P.A ${fromPA})`;
+      // Mark this attendant as the last one to send a message
+      markLastIncomingFromAttendant(fromPA);
+      // Register the attendant if not already registered
+      registerAttendant(fromName, fromPA);
+    }
+    // Supervisors also receive messages from other supervisors if targeted to them
+    else if (fromRole === "supervisao" && toPA === currentUser.pa) {
+      shouldReceive = true;
+      metaLabel = `${fromName} (Supervisor)`;
+    }
+  } else if (currentUser.role === "atendente") {
+    // Attendants receive messages from supervisors directed to them or to all
+    if (fromRole === "supervisao" && (toPA === currentUser.pa || toPA === "all")) {
+      shouldReceive = true;
+      metaLabel = `${fromName} (Supervisor)`;
+    }
+  }
+
+  if (shouldReceive) {
+    appendMessage(
+      {
+        text,
+        imageURL,
+        type: "received",
+        metaLabel,
+        timestamp
+      },
+      { save: true }
+    );
+  }
+}
+
+// Send a message to other tabs via localStorage
+function sendMessageToOtherTabs(messageData) {
+  try {
+    const messageWithId = {
+      ...messageData,
+      id: `${currentUser.pa}_${messageIdCounter++}`,
+      timestamp: new Date().toISOString()
+    };
+    localStorage.setItem(STORAGE_KEY_OUTGOING, JSON.stringify(messageWithId));
+    // Clear it immediately so the same message can be sent again
+    setTimeout(() => {
+      localStorage.removeItem(STORAGE_KEY_OUTGOING);
+    }, 100);
+  } catch (err) {
+    console.error("Error sending message:", err);
+  }
 }
 
 init();

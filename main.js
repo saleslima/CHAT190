@@ -22,6 +22,7 @@ const profileItems = document.querySelectorAll(".profile-item");
 let currentUser = null;
 let selectedRole = null;
 const attendantsRegistry = new Map(); // key: pa, value: { name, pa }
+const supervisorsRegistry = new Map(); // key: pa, value: { name, pa }
 const SUPERVISOR_PASSWORD = "superv190cop";
 let lastIncomingAttendantPA = null;
 
@@ -37,19 +38,37 @@ function registerAttendant(name, pa) {
 }
 
 /**
- * Popula o combo de destinos da supervisão com "Todos atendentes"
- * e a lista de atendentes logados.
+ * Registra um supervisor logado na lista global.
+ */
+function registerSupervisor(name, pa) {
+  if (!pa) return;
+  supervisorsRegistry.set(pa, { name, pa });
+}
+
+/**
+ * Popula o combo de destinos da supervisão com a lista de atendentes logados.
+ * A opção "Todos atendentes" foi removida.
  */
 function populateSupervisorTargets() {
   if (!supervisorControls || !targetSelect) return;
 
+  const previouslySelected = targetSelect.value;
+
   targetSelect.innerHTML = "";
 
-  // Para supervisão, apenas a opção "Todos atendentes" deve ficar disponível
-  const allOption = document.createElement("option");
-  allOption.value = "all";
-  allOption.textContent = "Todos atendentes";
-  targetSelect.appendChild(allOption);
+  attendantsRegistry.forEach((att, pa) => {
+    const option = document.createElement("option");
+    option.value = pa;
+    option.textContent = `${att.name} (P.A ${att.pa})`;
+    targetSelect.appendChild(option);
+  });
+
+  // Tenta manter a seleção anterior, ou selecionar o último atendente que enviou mensagem
+  if (lastIncomingAttendantPA && attendantsRegistry.has(lastIncomingAttendantPA)) {
+    targetSelect.value = lastIncomingAttendantPA;
+  } else if (previouslySelected && attendantsRegistry.has(previouslySelected)) {
+    targetSelect.value = previouslySelected;
+  }
 }
 
 /**
@@ -202,16 +221,15 @@ messageForm.addEventListener("submit", (event) => {
   let metaLabel = "";
 
   if (role === "supervisao") {
-    const targetValue = targetSelect.value || "all";
-    if (targetValue === "all") {
-      metaLabel = "Você → Todos atendentes";
-    } else if (attendantsRegistry.has(targetValue)) {
+    const targetValue = targetSelect.value;
+    if (targetValue && attendantsRegistry.has(targetValue)) {
       const att = attendantsRegistry.get(targetValue);
       metaLabel = `Você → ${att.name} (P.A ${att.pa})`;
     } else {
       metaLabel = "Você → Atendente";
     }
   } else {
+    // Atendente envia para supervisão; mensagem será recebida por todos supervisores logados
     metaLabel = "Você → Supervisão";
     if (currentUser?.pa) {
       markLastIncomingFromAttendant(currentUser.pa);
@@ -278,6 +296,8 @@ startChatBtn.addEventListener("click", () => {
 
   if (role === "atendente") {
     registerAttendant(name, pa);
+  } else if (role === "supervisao") {
+    registerSupervisor(name, pa);
   }
   // Após entrar no chat, o cabeçalho mostra apenas nome e P.A
   chatUserLabel.textContent = `${name} • P.A ${pa}`;

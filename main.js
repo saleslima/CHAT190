@@ -1,479 +1,44 @@
+const STORAGE_KEY_MESSAGES = "chatMessages";
+let messagesHistory = [];
+let messageIdCounter = Date.now();
+const messageChannel = new BroadcastChannel('chat_messages');
+
 const chatOverlay = document.getElementById("chat-overlay");
-const chatWindow = document.querySelector(".chat-window");
+const floatingChatBtn = document.getElementById("floatingChatBtn");
+const chatMinimizeBtn = document.getElementById("chatMinimizeBtn");
 const userSetup = document.getElementById("userSetup");
 const chatContent = document.getElementById("chatContent");
-const startChatBtn = document.getElementById("startChatBtn");
-const userNameInput = document.getElementById("userName");
+const detailsSection = document.getElementById("detailsSection");
+const supervisorPasswordSection = document.getElementById("supervisorPasswordSection");
+
 const userPAInput = document.getElementById("userPA");
-const chatUserLabel = document.getElementById("chatUserLabel");
+const userNameInput = document.getElementById("userName");
+const supervisorPasswordInput = document.getElementById("supervisorPassword");
+const profileItems = document.querySelectorAll(".profile-item");
+const startChatBtn = document.getElementById("startChatBtn");
+
 const messagesContainer = document.getElementById("messagesContainer");
 const messageForm = document.getElementById("messageForm");
 const messageInput = document.getElementById("messageInput");
 const imageInput = document.getElementById("imageInput");
-const chatMinimizeBtn = document.getElementById("chatMinimizeBtn");
-const floatingChatBtn = document.getElementById("floatingChatBtn");
-const supervisorPasswordSection = document.getElementById("supervisorPasswordSection");
-const supervisorPasswordInput = document.getElementById("supervisorPassword");
+
 const supervisorControls = document.getElementById("supervisorControls");
 const targetSelect = document.getElementById("targetSelect");
-const detailsSection = document.getElementById("detailsSection");
-const profileItems = document.querySelectorAll(".profile-item");
+const chatUserLabel = document.getElementById("chatUserLabel");
 
 let currentUser = null;
 let selectedRole = null;
-const attendantsRegistry = new Map(); // key: pa, value: { name, pa }
-const supervisorsRegistry = new Map(); // key: pa, value: { name, pa }
-const SUPERVISOR_PASSWORD = "superv190cop";
-let lastIncomingAttendantPA = null;
 
-const STORAGE_KEY_MESSAGES = "chatMessages";
-const STORAGE_KEY_OUTGOING = "chatOutgoingMessages";
-let messagesHistory = [];
-let messageIdCounter = Date.now();
+const SUPERVISOR_PASSWORD = "supervisor123";
 
-/**
- * Registra um atendente logado na lista global.
- */
-function registerAttendant(name, pa) {
-  if (!pa) return;
-  attendantsRegistry.set(pa, { name, pa });
-  if (currentUser && currentUser.role === "supervisao") {
-    populateSupervisorTargets();
-  }
-}
-
-/**
- * Registra um supervisor logado na lista global.
- */
-function registerSupervisor(name, pa) {
-  if (!pa) return;
-  supervisorsRegistry.set(pa, { name, pa });
-}
-
-/**
- * Popula o combo de destinos da supervisão com a lista de atendentes logados.
- * Inclui a opção "Todos atendentes" para enviar para todos os logados.
- */
-function populateSupervisorTargets() {
-  if (!supervisorControls || !targetSelect) return;
-
-  const previouslySelected = targetSelect.value;
-
-  targetSelect.innerHTML = "";
-
-  // Opção para enviar para todos os atendentes logados
-  const allOption = document.createElement("option");
-  allOption.value = "all";
-  allOption.textContent = "Todos atendentes";
-  targetSelect.appendChild(allOption);
-
-  // Opções individuais para cada atendente logado
-  attendantsRegistry.forEach((att, pa) => {
-    const option = document.createElement("option");
-    option.value = pa;
-    option.textContent = `${att.name} (P.A ${att.pa})`;
-    targetSelect.appendChild(option);
-  });
-
-  // Tenta manter a seleção anterior, ou selecionar o último atendente que enviou mensagem
-  if (lastIncomingAttendantPA && attendantsRegistry.has(lastIncomingAttendantPA)) {
-    targetSelect.value = lastIncomingAttendantPA;
-  } else if (previouslySelected && (previouslySelected === "all" || attendantsRegistry.has(previouslySelected))) {
-    targetSelect.value = previouslySelected;
-  } else {
-    targetSelect.value = "all";
-  }
-}
-
-/**
- * Marca que a última mensagem recebida pela supervisão veio de um atendente específico.
- * Em um cenário real isso seria chamado quando uma mensagem de um atendente chegar no supervisor.
- */
-function markLastIncomingFromAttendant(pa) {
-  if (!pa) return;
-  lastIncomingAttendantPA = pa;
-  if (currentUser && currentUser.role === "supervisao") {
-    populateSupervisorTargets();
-  }
-}
-
-function applyRoleUI() {
-  if (!selectedRole) {
-    detailsSection.classList.add("hidden");
-    supervisorPasswordSection.classList.add("hidden");
-    supervisorPasswordInput.value = "";
-    return;
-  }
-
-  detailsSection.classList.remove("hidden");
-
-  if (selectedRole === "supervisao") {
-    supervisorPasswordSection.classList.remove("hidden");
-  } else {
-    supervisorPasswordSection.classList.add("hidden");
-    supervisorPasswordInput.value = "";
-  }
-}
-
-function getSelectedRole() {
-  return selectedRole || "atendente";
-}
-
-// Força o chat a aparecer em primeiro plano
-function bringChatToFront() {
-  chatOverlay.classList.remove("hidden");
-  floatingChatBtn.classList.add("hidden");
-}
-
-// Minimizar / esconder janela do chat
-function minimizeChat() {
-  chatOverlay.classList.add("hidden");
-  floatingChatBtn.classList.remove("hidden");
-}
-
-// Obter IP público e preencher P.A automaticamente
-async function autoFillPA() {
-  try {
-    const response = await fetch("https://api.ipify.org?format=json");
-    if (!response.ok) throw new Error("Falha ao obter IP");
-    const data = await response.json();
-    const ip = data.ip || "";
-
-    // Tenta usar o último octeto do IPv4 e extrair os 3 últimos dígitos
-    const octets = ip.split(".");
-    let paValue = "000";
-
-    if (octets.length === 4) {
-      const lastOctet = octets[octets.length - 1].replace(/\D/g, "");
-      if (lastOctet) {
-        const last3 = lastOctet.slice(-3);
-        paValue = last3.padStart(3, "0");
-      }
-    } else {
-      // Fallback genérico caso não seja um IPv4 padrão
-      const digitsOnly = ip.replace(/\D/g, "");
-      const last3 = digitsOnly.slice(-3);
-      if (last3) {
-        paValue = last3.padStart(3, "0");
-      }
-    }
-
-    userPAInput.value = paValue;
-  } catch (e) {
-    userPAInput.value = "000";
-  }
-}
-
- // Cria uma mensagem na interface
-function appendMessage(message, options = {}) {
-  const { text, imageURL, type, metaLabel, timestamp } = message;
-  const { save = true } = options;
-
-  const usedTimestamp = timestamp || new Date().toISOString();
-
-  const row = document.createElement("div");
-  row.className = `message-row ${type}`;
-
-  const bubble = document.createElement("div");
-  bubble.className = "message-bubble";
-
-  if (text) {
-    const textNode = document.createElement("div");
-    textNode.textContent = text;
-    bubble.appendChild(textNode);
-  }
-
-  if (imageURL) {
-    const img = document.createElement("img");
-    img.className = "message-image";
-    img.src = imageURL;
-    img.alt = "Imagem enviada";
-    bubble.appendChild(img);
-  }
-
-  const meta = document.createElement("div");
-  meta.className = "message-meta";
-  const timeLabel = formatTime(usedTimestamp);
-  meta.textContent = `${metaLabel ? metaLabel + " • " : ""}${timeLabel}`;
-  bubble.appendChild(meta);
-
-  row.appendChild(bubble);
-  messagesContainer.appendChild(row);
-
-  // Rolagem para ver a última mensagem
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-  // Persiste a mensagem no histórico/localStorage, se necessário
-  if (save) {
-    const storedMessage = {
-      text: text || null,
-      imageURL: imageURL || null,
-      type: type || "received",
-      metaLabel: metaLabel || "",
-      timestamp: usedTimestamp
-    };
-    messagesHistory.push(storedMessage);
-    saveMessages();
-  }
-
-  // Ao receber uma mensagem, colocar o chat em primeiro plano
-  bringChatToFront();
-}
-
-function formatTime(timestamp) {
-  try {
-    const date = timestamp ? new Date(timestamp) : new Date();
-    if (Number.isNaN(date.getTime())) {
-      return "";
-    }
-    const hh = String(date.getHours()).padStart(2, "0");
-    const mm = String(date.getMinutes()).padStart(2, "0");
-    return `${hh}:${mm}`;
-  } catch {
-    return "";
-  }
-}
-
-function loadMessages() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_MESSAGES);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return;
-    messagesHistory = parsed;
-    parsed.forEach((msg) => {
-      appendMessage(msg, { save: false });
-    });
-  } catch (e) {
-    console.error("Erro ao carregar mensagens:", e);
-  }
-}
-
-function saveMessages() {
-  try {
-    localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messagesHistory));
-  } catch (e) {
-    console.error("Erro ao salvar mensagens:", e);
-  }
-}
-
-
-
- // Envio de mensagem
-messageForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const text = messageInput.value.trim();
-  const file = imageInput.files[0];
-
-  if (!text && !file) {
-    return;
-  }
-
-  let imageURL = null;
-  if (file) {
-    imageURL = URL.createObjectURL(file);
-  }
-
-  const role = currentUser?.role || getSelectedRole();
-  let metaLabel = "";
-  let toRole = "";
-  let toPA = "";
-
-  if (role === "supervisao") {
-    const targetValue = targetSelect.value;
-    if (targetValue === "all") {
-      metaLabel = "Você → Todos atendentes";
-      toRole = "atendente";
-      toPA = "all";
-    } else if (targetValue && attendantsRegistry.has(targetValue)) {
-      const att = attendantsRegistry.get(targetValue);
-      metaLabel = `Você → ${att.name} (P.A ${att.pa})`;
-      toRole = "atendente";
-      toPA = att.pa;
-    } else {
-      metaLabel = "Você → Atendente";
-      toRole = "atendente";
-      toPA = "all";
-    }
-  } else {
-    // Atendente envia para supervisão; mensagem será recebida por todos supervisores logados
-    metaLabel = "Você → Supervisão";
-    toRole = "supervisao";
-    toPA = "all";
-  }
-
-  appendMessage({
-    text,
-    imageURL,
-    type: "sent",
-    metaLabel
-  });
-
-  // Send message to other tabs
-  sendMessageToOtherTabs({
-    fromRole: role,
-    fromPA: currentUser.pa,
-    fromName: currentUser.name,
-    toRole,
-    toPA,
-    text,
-    imageURL
-  });
-
-  // Limpa campos
-  messageInput.value = "";
-  imageInput.value = "";
-});
-
-profileItems.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    selectedRole = btn.dataset.role;
-    profileItems.forEach((b) => {
-      b.classList.toggle("active", b === btn);
-    });
-    applyRoleUI();
-  });
-});
-
-// Início do chat após informar nome e P.A
-startChatBtn.addEventListener("click", () => {
-  const name = userNameInput.value.trim();
-  const pa = userPAInput.value.trim();
-  const role = getSelectedRole();
-
-  if (!name) {
-    userNameInput.focus();
-    return;
-  }
-
-  if (role === "supervisao") {
-    const enteredPassword = supervisorPasswordInput.value;
-    if (enteredPassword !== SUPERVISOR_PASSWORD) {
-      supervisorPasswordInput.value = "";
-      supervisorPasswordInput.focus();
-      return;
-    }
-
-    // Oculta o campo de senha após validação
-    supervisorPasswordSection.classList.add("hidden");
-    supervisorPasswordInput.value = "";
-
-    // Configura opções de envio apenas para supervisão
-    supervisorControls.classList.remove("hidden");
-    populateSupervisorTargets();
-  } else {
-    supervisorControls.classList.add("hidden");
-    targetSelect.innerHTML = "";
-  }
-
-  currentUser = { name, pa, role };
-
-  if (role === "atendente") {
-    registerAttendant(name, pa);
-  } else if (role === "supervisao") {
-    registerSupervisor(name, pa);
-  }
-  // Após entrar no chat, o cabeçalho mostra apenas nome e P.A
-  chatUserLabel.textContent = `${name} • P.A ${pa}`;
-
-  userSetup.classList.add("hidden");
-  chatContent.classList.remove("hidden");
-
-  appendMessage({
-    text: `Olá, ${name}! Seu atendimento foi iniciado.`,
-    imageURL: null,
-    type: "received",
-    metaLabel: "Sistema"
-  });
-
-  bringChatToFront();
-});
-
-// Minimizar chat
-chatMinimizeBtn.addEventListener("click", () => {
-  minimizeChat();
-});
-
-// Reabrir chat pelo botão flutuante
-floatingChatBtn.addEventListener("click", () => {
-  bringChatToFront();
-});
-
-// Inicialização
-function init() {
-  bringChatToFront();
-  autoFillPA();
-  applyRoleUI();
-  loadMessages();
-  setupStorageListener();
-}
-
-// Listen for messages from other tabs
+// Listen for messages from other tabs and same tab
 function setupStorageListener() {
-  window.addEventListener("storage", (e) => {
-    if (e.key === STORAGE_KEY_OUTGOING && e.newValue) {
-      try {
-        const message = JSON.parse(e.newValue);
-        handleIncomingMessage(message);
-      } catch (err) {
-        console.error("Error parsing incoming message:", err);
-      }
-    }
-  });
+  messageChannel.onmessage = (event) => {
+    handleIncomingMessage(event.data);
+  };
 }
 
-// Handle incoming messages from other tabs
-function handleIncomingMessage(message) {
-  if (!currentUser) return;
-
-  const { fromRole, fromPA, fromName, toRole, toPA, text, imageURL, timestamp, id } = message;
-
-  // Skip if this is our own message
-  if (fromPA === currentUser.pa && fromRole === currentUser.role) {
-    return;
-  }
-
-  let shouldReceive = false;
-  let metaLabel = "";
-
-  if (currentUser.role === "supervisao") {
-    // Supervisors receive messages from attendants
-    if (fromRole === "atendente") {
-      shouldReceive = true;
-      metaLabel = `${fromName} (P.A ${fromPA})`;
-      // Mark this attendant as the last one to send a message
-      markLastIncomingFromAttendant(fromPA);
-      // Register the attendant if not already registered
-      registerAttendant(fromName, fromPA);
-    }
-    // Supervisors also receive messages from other supervisors if targeted to them
-    else if (fromRole === "supervisao" && toPA === currentUser.pa) {
-      shouldReceive = true;
-      metaLabel = `${fromName} (Supervisor)`;
-    }
-  } else if (currentUser.role === "atendente") {
-    // Attendants receive messages from supervisors directed to them or to all
-    if (fromRole === "supervisao" && (toPA === currentUser.pa || toPA === "all")) {
-      shouldReceive = true;
-      metaLabel = `${fromName} (Supervisor)`;
-    }
-  }
-
-  if (shouldReceive) {
-    appendMessage(
-      {
-        text,
-        imageURL,
-        type: "received",
-        metaLabel,
-        timestamp
-      },
-      { save: true }
-    );
-  }
-}
-
-// Send a message to other tabs via localStorage
+// Send a message to other tabs via BroadcastChannel
 function sendMessageToOtherTabs(messageData) {
   try {
     const messageWithId = {
@@ -481,14 +46,315 @@ function sendMessageToOtherTabs(messageData) {
       id: `${currentUser.pa}_${messageIdCounter++}`,
       timestamp: new Date().toISOString()
     };
-    localStorage.setItem(STORAGE_KEY_OUTGOING, JSON.stringify(messageWithId));
-    // Clear it immediately so the same message can be sent again
-    setTimeout(() => {
-      localStorage.removeItem(STORAGE_KEY_OUTGOING);
-    }, 100);
+    messageChannel.postMessage(messageWithId);
   } catch (err) {
     console.error("Error sending message:", err);
   }
 }
 
-init();
+// Handle incoming message from another tab
+function handleIncomingMessage(message) {
+  if (!currentUser) return;
+
+  // Don't process our own messages
+  if (message.from === currentUser.pa) return;
+
+  const shouldReceive = shouldReceiveMessage(message);
+  if (shouldReceive) {
+    addMessageToHistory(message);
+    displayMessage(message);
+    showChatOverlay();
+  }
+}
+
+// Determine if current user should receive this message
+function shouldReceiveMessage(message) {
+  if (!currentUser) return false;
+
+  // If message is from atendente, all supervisors should receive
+  if (message.fromRole === "atendente" && currentUser.role === "supervisao") {
+    return true;
+  }
+
+  // If message is from supervisor to specific target
+  if (message.fromRole === "supervisao") {
+    if (message.target === "all") {
+      // All logged in users receive
+      return true;
+    } else if (message.target === currentUser.pa) {
+      // Specific target
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Save messages to localStorage
+function saveMessages() {
+  try {
+    localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messagesHistory));
+  } catch (err) {
+    console.error("Error saving messages:", err);
+  }
+}
+
+// Load messages from localStorage
+function loadMessages() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_MESSAGES);
+    if (stored) {
+      messagesHistory = JSON.parse(stored);
+    }
+  } catch (err) {
+    console.error("Error loading messages:", err);
+  }
+}
+
+// Add message to history
+function addMessageToHistory(message) {
+  messagesHistory.push(message);
+  saveMessages();
+}
+
+// Display a message in the UI
+function displayMessage(message) {
+  const isSent = message.from === currentUser.pa;
+  const messageRow = document.createElement("div");
+  messageRow.className = `message-row ${isSent ? "sent" : "received"}`;
+
+  const messageBubble = document.createElement("div");
+  messageBubble.className = "message-bubble";
+
+  if (message.text) {
+    const textNode = document.createTextNode(message.text);
+    messageBubble.appendChild(textNode);
+  }
+
+  if (message.image) {
+    const img = document.createElement("img");
+    img.src = message.image;
+    img.className = "message-image";
+    messageBubble.appendChild(img);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "message-meta";
+  const time = new Date(message.timestamp).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  meta.textContent = time;
+  messageBubble.appendChild(meta);
+
+  messageRow.appendChild(messageBubble);
+  messagesContainer.appendChild(messageRow);
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+// Get last 3 digits of IPv4
+async function getLastThreeDigitsOfIP() {
+  try {
+    const response = await fetch("https://api.ipify.org?format=json");
+    const data = await response.json();
+    const ip = data.ip;
+    const parts = ip.split(".");
+    if (parts.length === 4) {
+      return parts[3];
+    }
+  } catch (err) {
+    console.error("Error fetching IP:", err);
+  }
+  return Math.floor(100 + Math.random() * 900).toString();
+}
+
+// Initialize PA field
+async function initializePA() {
+  const pa = await getLastThreeDigitsOfIP();
+  userPAInput.value = pa;
+}
+
+// Profile selection
+profileItems.forEach((item) => {
+  item.addEventListener("click", () => {
+    profileItems.forEach((i) => i.classList.remove("active"));
+    item.classList.add("active");
+    selectedRole = item.dataset.role;
+    detailsSection.classList.remove("hidden");
+
+    if (selectedRole === "supervisao") {
+      supervisorPasswordSection.classList.remove("hidden");
+    } else {
+      supervisorPasswordSection.classList.add("hidden");
+    }
+  });
+});
+
+// Start chat
+startChatBtn.addEventListener("click", () => {
+  const name = userNameInput.value.trim();
+  const pa = userPAInput.value;
+
+  if (!selectedRole) {
+    alert("Por favor, selecione um perfil.");
+    return;
+  }
+
+  if (!name) {
+    alert("Por favor, digite seu nome.");
+    return;
+  }
+
+  if (selectedRole === "supervisao") {
+    const password = supervisorPasswordInput.value.trim();
+    if (password !== SUPERVISOR_PASSWORD) {
+      alert("Senha de supervisão incorreta.");
+      return;
+    }
+    // Hide password section after successful login
+    supervisorPasswordSection.classList.add("hidden");
+  }
+
+  currentUser = {
+    name,
+    pa,
+    role: selectedRole,
+  };
+
+  chatUserLabel.textContent = `P.A: ${pa} • ${name}`;
+
+  userSetup.classList.add("hidden");
+  chatContent.classList.remove("hidden");
+
+  if (selectedRole === "supervisao") {
+    supervisorControls.classList.remove("hidden");
+    updateTargetSelect();
+  } else {
+    supervisorControls.classList.add("hidden");
+  }
+
+  loadMessages();
+  displayRelevantMessages();
+  setupStorageListener();
+});
+
+// Display relevant messages for current user
+function displayRelevantMessages() {
+  messagesContainer.innerHTML = "";
+  messagesHistory.forEach((message) => {
+    if (isMessageRelevant(message)) {
+      displayMessage(message);
+    }
+  });
+}
+
+// Check if message is relevant to current user
+function isMessageRelevant(message) {
+  // User's own messages
+  if (message.from === currentUser.pa) {
+    return true;
+  }
+
+  // Messages directed to this user
+  if (shouldReceiveMessage(message)) {
+    return true;
+  }
+
+  return false;
+}
+
+// Update target select for supervisors
+function updateTargetSelect() {
+  targetSelect.innerHTML = "";
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = "Todos";
+  targetSelect.appendChild(allOption);
+
+  // In a real scenario, you'd get logged in users from a server
+  // For now, we'll just show option for "all"
+}
+
+// Send message
+messageForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  const text = messageInput.value.trim();
+  const imageFile = imageInput.files[0];
+  let imageData = null;
+
+  if (imageFile) {
+    imageData = await fileToBase64(imageFile);
+  }
+
+  if (!text && !imageData) {
+    return;
+  }
+
+  const messageData = {
+    from: currentUser.pa,
+    fromName: currentUser.name,
+    fromRole: currentUser.role,
+    text: text || "",
+    image: imageData,
+  };
+
+  // For supervisor, set target
+  if (currentUser.role === "supervisao") {
+    messageData.target = targetSelect.value;
+  } else {
+    // Atendente messages go to all supervisors
+    messageData.target = "supervisao";
+  }
+
+  // Display own message immediately
+  const displayData = {
+    ...messageData,
+    id: `${currentUser.pa}_${messageIdCounter++}`,
+    timestamp: new Date().toISOString(),
+  };
+  addMessageToHistory(displayData);
+  displayMessage(displayData);
+
+  // Send to other tabs
+  sendMessageToOtherTabs(messageData);
+
+  messageInput.value = "";
+  imageInput.value = "";
+});
+
+// File to base64
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Show chat overlay
+function showChatOverlay() {
+  chatOverlay.classList.remove("hidden");
+  floatingChatBtn.classList.add("hidden");
+}
+
+// Hide chat overlay
+function hideChatOverlay() {
+  chatOverlay.classList.add("hidden");
+  floatingChatBtn.classList.remove("hidden");
+}
+
+// Minimize chat
+chatMinimizeBtn.addEventListener("click", () => {
+  hideChatOverlay();
+});
+
+// Reopen chat
+floatingChatBtn.addEventListener("click", () => {
+  showChatOverlay();
+});
+
+// Initialize
+initializePA();
+showChatOverlay();

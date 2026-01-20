@@ -31,11 +31,14 @@ console.log("Firebase initialized successfully");
 let messagesHistory = [];
 let messageIdCounter = Date.now();
 let isFirstLoad = true;
+let activeUsers = {};
+let usersUnsubscribe = null;
 
 const chatOverlay = document.getElementById("chat-overlay");
 const floatingChatBtn = document.getElementById("floatingChatBtn");
 const chatMinimizeBtn = document.getElementById("chatMinimizeBtn");
-const logoutBtn = document.getElementById("logoutBtn");
+const clearChatBtn = document.getElementById("clearChatBtn");
+const chatCloseBtn = document.getElementById("chatCloseBtn");
 const userSetup = document.getElementById("userSetup");
 const chatContent = document.getElementById("chatContent");
 const detailsSection = document.getElementById("detailsSection");
@@ -64,8 +67,50 @@ let selectedRole = null;
 
 const SUPERVISOR_PASSWORDS = {
   supervisao_civil: "superciv",
-  supervisao_militar: "supermil"
+  supervisao_militar: "supermil",
+  supervisao_cobom: "supercobom"
 };
+
+// Check if message is older than 2 hours
+function isMessageExpired(timestamp) {
+  if (!timestamp) return false;
+  const twoHours = 2 * 60 * 60 * 1000;
+  return (Date.now() - new Date(timestamp).getTime()) > twoHours;
+}
+
+// Check if message is relevant to current user
+function isMessageRelevant(message) {
+  if (isMessageExpired(message.timestamp)) return false;
+
+  const myPA = currentUser.pa;
+  const myName = currentUser.name.toUpperCase();
+
+  // 1. Sent by me (Strict Check: Must match PA and Name)
+  if (message.from === myPA) {
+    return message.fromName === myName;
+  }
+
+  // 2. Sent to me
+  
+  // Broadcast
+  if (message.target === 'all') return true;
+
+  // Targeted at my PA
+  if (message.target === myPA) {
+    // If targetName exists, it MUST match the current user name
+    if (message.targetName && message.targetName !== myName) {
+      return false;
+    }
+    return true;
+  }
+
+  // Targeted at my Role (I am supervisor receiving from Atendente)
+  if (["supervisao_civil", "supervisao_militar", "supervisao_cobom"].includes(currentUser.role)) {
+     if (message.supervisorType === currentUser.role) return true;
+  }
+
+  return false;
+}
 
 // Listen for messages from Firebase
 function setupFirebaseListener() {
@@ -82,24 +127,28 @@ function setupFirebaseListener() {
       });
     });
     
+    // Filter messages globally for expiration
+    const validMessages = messages.filter(msg => !isMessageExpired(msg.timestamp));
+    
     if (isFirstLoad) {
-      // On first load, just display relevant messages
-      messagesHistory = messages;
+      messagesHistory = validMessages;
       displayRelevantMessages();
       isFirstLoad = false;
     } else {
-      // For new messages, check if they should trigger notification
-      const newMessages = messages.filter(msg => 
+      // Find new messages
+      const newMessages = validMessages.filter(msg => 
         !messagesHistory.find(m => m.id === msg.id || (m.id && m.id.startsWith('temp_')))
       );
       
-      messagesHistory = messages;
+      messagesHistory = validMessages;
       
       newMessages.forEach(message => {
         // Only display if it's from someone else and relevant
-        if (message.from !== currentUser.pa && shouldReceiveMessage(message)) {
-          displayMessage(message);
-          showChatOverlay();
+        // Note: isMessageRelevant handles "sent by me" logic, so we keep the from check 
+        // to avoid displaying double messages (since we push locally)
+        if (message.from !== currentUser.pa && isMessageRelevant(message)) {
+           displayMessage(message);
+           showChatOverlay();
         }
       });
     }
@@ -121,31 +170,6 @@ async function sendMessageToFirebase(messageData) {
     alert("Erro ao enviar mensagem. Por favor, tente novamente.");
     throw err;
   }
-}
-
-// Determine if current user should receive this message
-function shouldReceiveMessage(message) {
-  if (!currentUser) return false;
-
-  // If message is from atendente to specific supervisor type
-  if (message.fromRole === "atendente") {
-    if (message.supervisorType === currentUser.role) {
-      return true;
-    }
-  }
-
-  // If message is from supervisor to specific target
-  if (message.fromRole === "supervisao_civil" || message.fromRole === "supervisao_militar") {
-    if (message.target === "all") {
-      // All logged in users receive
-      return true;
-    } else if (message.target === currentUser.pa) {
-      // Specific target
-      return true;
-    }
-  }
-
-  return false;
 }
 
 
@@ -188,7 +212,7 @@ function displayMessage(message) {
   messageBubble.appendChild(meta);
   
   // Click to reply for supervisors
-  if (!isSent && (currentUser.role === 'supervisao_civil' || currentUser.role === 'supervisao_militar')) {
+  if (!isSent && ["supervisao_civil", "supervisao_militar", "supervisao_cobom"].includes(currentUser.role)) {
     messageBubble.style.cursor = 'pointer';
     messageBubble.title = 'Clique para responder a este usuário';
     messageBubble.addEventListener('click', () => {
@@ -201,7 +225,7 @@ function displayMessage(message) {
          messageBubble.style.opacity = '0.7';
          setTimeout(() => messageBubble.style.opacity = '1', 200);
        } else {
-         alert("Usuário não está mais disponível na lista de ativos.");
+         alert("Usuário não está online/disponível na lista de ativos.");
        }
     });
   }
@@ -212,8 +236,53 @@ function displayMessage(message) {
 }
 
 // Initialize PA field (Removed IP logic, now manual)
-function initializePA() {
-  // Manual entry now
+function populatePASelect() {
+  userPAInput.innerHTML = '<option value="" disabled selected>Selecione o P.A</option>';
+  for (let i = 1; i <= 208; i++) {
+    const val = i.toString().padStart(3, '0');
+    const option = document.createElement('option');
+    option.value = val;
+    option.textContent = `P.A ${val}`;
+    userPAInput.appendChild(option);
+  }
+}
+populatePASelect();
+
+function setupUsersListener() {
+  const usersQuery = query(usersRef);
+  usersUnsubscribe = onValue(usersQuery, (snapshot) => {
+    activeUsers = snapshot.val() || {};
+    updateTargetSelect();
+  });
+}
+
+function updateTargetSelect() {
+  // Only for supervisors
+  if (!currentUser || !['supervisao_civil', 'supervisao_militar', 'supervisao_cobom'].includes(currentUser.role)) return;
+  
+  const currentVal = targetSelect.value;
+  targetSelect.innerHTML = '<option value="" disabled selected>Selecione o destinatário</option>';
+  
+  const allOption = document.createElement('option');
+  allOption.value = 'all';
+  allOption.textContent = 'TODOS';
+  targetSelect.appendChild(allOption);
+  
+  // Sort by PA
+  Object.keys(activeUsers).sort().forEach(paKey => {
+     // Don't list myself
+     if (paKey === currentUser.pa) return;
+     
+     const user = activeUsers[paKey];
+     const option = document.createElement('option');
+     option.value = paKey;
+     option.textContent = `P.A ${paKey} - ${user.name} (${formatRole(user.role)})`;
+     targetSelect.appendChild(option);
+  });
+  
+  if (currentVal && targetSelect.querySelector(`option[value="${currentVal}"]`)) {
+    targetSelect.value = currentVal;
+  }
 }
 
 // Profile selection
@@ -230,6 +299,9 @@ profileItems.forEach((item) => {
     } else if (selectedRole === "supervisao_militar") {
       supervisorPasswordSection.classList.remove("hidden");
       passwordHint.textContent = "Senha: SUPERMIL";
+    } else if (selectedRole === "supervisao_cobom") {
+      supervisorPasswordSection.classList.remove("hidden");
+      passwordHint.textContent = "Senha: SUPERCOBOM";
     } else {
       supervisorPasswordSection.classList.add("hidden");
       passwordHint.textContent = "";
@@ -270,9 +342,8 @@ startChatBtn.addEventListener("click", async () => {
     return;
   }
 
-  if (selectedRole === "supervisao_civil" || selectedRole === "supervisao_militar") {
+  if (["supervisao_civil", "supervisao_militar", "supervisao_cobom"].includes(selectedRole)) {
     const password = supervisorPasswordInput.value.trim();
-    // Verifica a senha ignorando maiúsculas/minúsculas para evitar erros
     if (password.toLowerCase() !== SUPERVISOR_PASSWORDS[selectedRole].toLowerCase()) {
       alert("Senha incorreta. A senha correta é: " + SUPERVISOR_PASSWORDS[selectedRole].toUpperCase());
       return;
@@ -303,14 +374,15 @@ startChatBtn.addEventListener("click", async () => {
   });
 
   const roleLabel = selectedRole === "atendente" ? "Atendente" : 
-                    selectedRole === "supervisao_civil" ? "Superv Civil" : "Superv Militar";
+                    selectedRole === "supervisao_civil" ? "Sup. Civil" : 
+                    selectedRole === "supervisao_cobom" ? "Sup. COBOM" : "Sup. Militar";
   chatUserLabel.textContent = `P.A: ${pa} • ${name} • ${roleLabel}`;
 
   userSetup.classList.add("hidden");
   chatContent.classList.remove("hidden");
-  logoutBtn.classList.remove("hidden");
+  clearChatBtn.classList.remove("hidden");
 
-  if (selectedRole === "supervisao_civil" || selectedRole === "supervisao_militar") {
+  if (["supervisao_civil", "supervisao_militar", "supervisao_cobom"].includes(selectedRole)) {
     supervisorControls.classList.remove("hidden");
     atendenteControls.classList.add("hidden");
     setupUsersListener(); 
@@ -323,38 +395,45 @@ startChatBtn.addEventListener("click", async () => {
   setupFirebaseListener();
 });
 
-// Logout
-logoutBtn.addEventListener("click", async () => {
+function logout() {
   if (currentUser) {
     try {
-      await remove(ref(database, `users/${currentUser.pa}`));
-    } catch(e) {
-      console.error("Error removing user", e);
-    }
+      remove(ref(database, `users/${currentUser.pa}`));
+    } catch(e) { console.error(e); }
   }
-  // Reset user state
+  
+  if (usersUnsubscribe) {
+    usersUnsubscribe();
+    usersUnsubscribe = null;
+  }
+  activeUsers = {};
+  
   currentUser = null;
   selectedRole = null;
   messagesHistory = [];
-  
-  // Clear UI
   messagesContainer.innerHTML = "";
   chatUserLabel.textContent = "";
   
-  // Reset inputs
   userNameInput.value = "";
   supervisorPasswordInput.value = "";
   messageInput.value = "";
+  userPAInput.value = "";
   
-  // Reset views
   chatContent.classList.add("hidden");
   userSetup.classList.remove("hidden");
-  logoutBtn.classList.add("hidden");
+  clearChatBtn.classList.add("hidden");
   detailsSection.classList.add("hidden");
   supervisorPasswordSection.classList.add("hidden");
   
-  // Deselect profile items
   profileItems.forEach(item => item.classList.remove("active"));
+}
+
+chatCloseBtn.addEventListener("click", logout);
+
+clearChatBtn.addEventListener("click", () => {
+  // Clear local view only
+  messagesContainer.innerHTML = '';
+  // We don't delete from DB, just clear screen as requested
 });
 
 // Display relevant messages for current user
@@ -367,51 +446,11 @@ function displayRelevantMessages() {
   });
 }
 
-// Check if message is relevant to current user
-function isMessageRelevant(message) {
-  // User's own messages
-  if (message.from === currentUser.pa) {
-    return true;
-  }
-
-  // Messages directed to this user
-  if (shouldReceiveMessage(message)) {
-    return true;
-  }
-
-  return false;
-}
-
-// Setup listener for logged in users (for supervisors)
-function setupUsersListener() {
-  onValue(usersRef, (snapshot) => {
-    targetSelect.innerHTML = "";
-    
-    // Default option
-    const allOption = document.createElement("option");
-    allOption.value = "all";
-    allOption.textContent = "Todos";
-    targetSelect.appendChild(allOption);
-    
-    snapshot.forEach((childSnapshot) => {
-      const user = childSnapshot.val();
-      const pa = childSnapshot.key;
-      
-      // Don't list yourself
-      if (pa !== currentUser.pa) {
-        const option = document.createElement("option");
-        option.value = pa;
-        option.textContent = `P.A ${pa} - ${user.name} (${formatRole(user.role)})`;
-        targetSelect.appendChild(option);
-      }
-    });
-  });
-}
-
 function formatRole(role) {
   if (role === 'atendente') return 'Atendente';
   if (role === 'supervisao_civil') return 'Sup. Civil';
   if (role === 'supervisao_militar') return 'Sup. Militar';
+  if (role === 'supervisao_cobom') return 'Sup. COBOM';
   return role;
 }
 
@@ -440,10 +479,18 @@ messageForm.addEventListener("submit", async (e) => {
   };
 
   // For supervisor, set target
-  if (currentUser.role === "supervisao_civil" || currentUser.role === "supervisao_militar") {
+  if (["supervisao_civil", "supervisao_militar", "supervisao_cobom"].includes(currentUser.role)) {
+    if (!targetSelect.value) {
+      alert("Selecione um destinatário.");
+      return;
+    }
     messageData.target = targetSelect.value;
+    
+    // Attach target name for strict visibility matching
+    if (messageData.target !== 'all' && activeUsers[messageData.target]) {
+      messageData.targetName = activeUsers[messageData.target].name.toUpperCase();
+    }
   } else if (currentUser.role === "atendente") {
-    // Atendente messages go to selected supervisor type
     messageData.supervisorType = supervisorTypeSelect.value;
   }
 

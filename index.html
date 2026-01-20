@@ -25,22 +25,32 @@
             <span class="chat-user-label" id="chatUserLabel"></span>
           </div>
           <div class="header-actions">
-            <button id="logoutBtn" class="icon-btn hidden" aria-label="Sair" title="Sair">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                <polyline points="16 17 21 12 16 7"></polyline>
-                <line x1="21" y1="12" x2="9" y2="12"></line>
+            <button id="clearChatBtn" class="icon-btn hidden" aria-label="Limpar Conversa" title="Limpar Conversa">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 6h18"></path>
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
               </svg>
             </button>
-            <button id="chatMinimizeBtn" class="icon-btn" aria-label="Minimizar chat">−</button>
+            <button id="chatMinimizeBtn" class="icon-btn" aria-label="Minimizar chat" title="Minimizar">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                 <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+            <button id="chatCloseBtn" class="icon-btn" aria-label="Fechar" title="Fechar/Sair">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
           </div>
         </header>
 
         <div id="userSetup" class="user-setup">
           <div class="setup-section">
             <label class="field-label" for="userPA">P.A</label>
-            <input id="userPA" type="text" class="text-input" placeholder="Digite seu P.A" />
-            <p class="field-hint">Informe seu número de P.A (deve ser único).</p>
+            <select id="userPA" class="select-input setup-select"></select>
+            <p class="field-hint">Selecione seu número de P.A.</p>
           </div>
 
           <div class="setup-section">
@@ -49,6 +59,7 @@
               <button type="button" class="profile-item" data-role="atendente">Atendente</button>
               <button type="button" class="profile-item" data-role="supervisao_civil">Superv Civil</button>
               <button type="button" class="profile-item" data-role="supervisao_militar">Superv Militar</button>
+              <button type="button" class="profile-item" data-role="supervisao_cobom">Superv COBOM</button>
             </div>
           </div>
 
@@ -90,6 +101,7 @@
             <select id="supervisorTypeSelect" class="select-input">
               <option value="supervisao_civil">Superv Civil</option>
               <option value="supervisao_militar">Superv Militar</option>
+              <option value="supervisao_cobom">Superv COBOM</option>
             </select>
           </div>
           <div id="messagesContainer" class="messages-container"></div>

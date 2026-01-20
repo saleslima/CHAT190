@@ -5,7 +5,11 @@ import {
   push,
   onValue,
   query,
-  limitToLast
+  limitToLast,
+  set,
+  get,
+  remove,
+  onDisconnect
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 const firebaseConfig = {
@@ -21,6 +25,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const database = getDatabase(app);
 const messagesRef = ref(database, 'messages');
+const usersRef = ref(database, 'users');
 console.log("Firebase initialized successfully");
 
 let messagesHistory = [];
@@ -154,9 +159,16 @@ function displayMessage(message) {
   const messageBubble = document.createElement("div");
   messageBubble.className = "message-bubble";
 
+  // Sender Info
+  const senderInfo = document.createElement("div");
+  senderInfo.className = "message-sender-info";
+  senderInfo.textContent = `${message.fromName || 'Usuario'} (P.A ${message.from})`;
+  messageBubble.appendChild(senderInfo);
+
   if (message.text) {
-    const textNode = document.createTextNode(message.text);
-    messageBubble.appendChild(textNode);
+    const textDiv = document.createElement("div");
+    textDiv.textContent = message.text;
+    messageBubble.appendChild(textDiv);
   }
 
   if (message.image) {
@@ -174,32 +186,34 @@ function displayMessage(message) {
   });
   meta.textContent = time;
   messageBubble.appendChild(meta);
+  
+  // Click to reply for supervisors
+  if (!isSent && (currentUser.role === 'supervisao_civil' || currentUser.role === 'supervisao_militar')) {
+    messageBubble.style.cursor = 'pointer';
+    messageBubble.title = 'Clique para responder a este usuário';
+    messageBubble.addEventListener('click', () => {
+       // Check if option exists in dropdown
+       const option = targetSelect.querySelector(`option[value="${message.from}"]`);
+       if (option) {
+         targetSelect.value = message.from;
+         messageInput.focus();
+         // Visual feedback
+         messageBubble.style.opacity = '0.7';
+         setTimeout(() => messageBubble.style.opacity = '1', 200);
+       } else {
+         alert("Usuário não está mais disponível na lista de ativos.");
+       }
+    });
+  }
 
   messageRow.appendChild(messageBubble);
   messagesContainer.appendChild(messageRow);
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
-// Get last 3 digits of IPv4
-async function getLastThreeDigitsOfIP() {
-  try {
-    const response = await fetch("https://api.ipify.org?format=json");
-    const data = await response.json();
-    const ip = data.ip;
-    const parts = ip.split(".");
-    if (parts.length === 4) {
-      return parts[3];
-    }
-  } catch (err) {
-    console.error("Error fetching IP:", err);
-  }
-  return Math.floor(100 + Math.random() * 900).toString();
-}
-
-// Initialize PA field
-async function initializePA() {
-  const pa = await getLastThreeDigitsOfIP();
-  userPAInput.value = pa;
+// Initialize PA field (Removed IP logic, now manual)
+function initializePA() {
+  // Manual entry now
 }
 
 // Profile selection
@@ -224,17 +238,35 @@ profileItems.forEach((item) => {
 });
 
 // Start chat
-startChatBtn.addEventListener("click", () => {
+startChatBtn.addEventListener("click", async () => {
   const name = userNameInput.value.trim();
-  const pa = userPAInput.value;
+  const pa = userPAInput.value.trim();
 
   if (!selectedRole) {
     alert("Por favor, selecione um perfil.");
     return;
   }
 
+  if (!pa) {
+    alert("Por favor, digite seu P.A.");
+    return;
+  }
+
   if (!name) {
     alert("Por favor, digite seu nome.");
+    return;
+  }
+
+  // Check if PA is already in use
+  try {
+    const userSnapshot = await get(ref(database, `users/${pa}`));
+    if (userSnapshot.exists()) {
+      alert(`O P.A. ${pa} já está em uso por outro usuário.`);
+      return;
+    }
+  } catch (error) {
+    console.error("Erro ao verificar usuário:", error);
+    alert("Erro de conexão. Tente novamente.");
     return;
   }
 
@@ -254,6 +286,22 @@ startChatBtn.addEventListener("click", () => {
     role: selectedRole,
   };
 
+  // Register user presence
+  const userRef = ref(database, `users/${pa}`);
+  await set(userRef, {
+    name,
+    role: selectedRole,
+    loginTime: Date.now()
+  });
+  
+  // Remove user on disconnect
+  onDisconnect(userRef).remove();
+  
+  // Attempt clean removal on window close
+  window.addEventListener('beforeunload', () => {
+    remove(userRef);
+  });
+
   const roleLabel = selectedRole === "atendente" ? "Atendente" : 
                     selectedRole === "supervisao_civil" ? "Superv Civil" : "Superv Militar";
   chatUserLabel.textContent = `P.A: ${pa} • ${name} • ${roleLabel}`;
@@ -265,7 +313,7 @@ startChatBtn.addEventListener("click", () => {
   if (selectedRole === "supervisao_civil" || selectedRole === "supervisao_militar") {
     supervisorControls.classList.remove("hidden");
     atendenteControls.classList.add("hidden");
-    updateTargetSelect();
+    setupUsersListener(); 
   } else if (selectedRole === "atendente") {
     supervisorControls.classList.add("hidden");
     atendenteControls.classList.remove("hidden");
@@ -276,7 +324,14 @@ startChatBtn.addEventListener("click", () => {
 });
 
 // Logout
-logoutBtn.addEventListener("click", () => {
+logoutBtn.addEventListener("click", async () => {
+  if (currentUser) {
+    try {
+      await remove(ref(database, `users/${currentUser.pa}`));
+    } catch(e) {
+      console.error("Error removing user", e);
+    }
+  }
   // Reset user state
   currentUser = null;
   selectedRole = null;
@@ -327,16 +382,37 @@ function isMessageRelevant(message) {
   return false;
 }
 
-// Update target select for supervisors
-function updateTargetSelect() {
-  targetSelect.innerHTML = "";
-  const allOption = document.createElement("option");
-  allOption.value = "all";
-  allOption.textContent = "Todos";
-  targetSelect.appendChild(allOption);
+// Setup listener for logged in users (for supervisors)
+function setupUsersListener() {
+  onValue(usersRef, (snapshot) => {
+    targetSelect.innerHTML = "";
+    
+    // Default option
+    const allOption = document.createElement("option");
+    allOption.value = "all";
+    allOption.textContent = "Todos";
+    targetSelect.appendChild(allOption);
+    
+    snapshot.forEach((childSnapshot) => {
+      const user = childSnapshot.val();
+      const pa = childSnapshot.key;
+      
+      // Don't list yourself
+      if (pa !== currentUser.pa) {
+        const option = document.createElement("option");
+        option.value = pa;
+        option.textContent = `P.A ${pa} - ${user.name} (${formatRole(user.role)})`;
+        targetSelect.appendChild(option);
+      }
+    });
+  });
+}
 
-  // In a real scenario, you'd get logged in users from a server
-  // For now, we'll just show option for "all"
+function formatRole(role) {
+  if (role === 'atendente') return 'Atendente';
+  if (role === 'supervisao_civil') return 'Sup. Civil';
+  if (role === 'supervisao_militar') return 'Sup. Militar';
+  return role;
 }
 
 // Send message
@@ -427,5 +503,4 @@ floatingChatBtn.addEventListener("click", () => {
 });
 
 // Initialize
-initializePA();
 showChatOverlay();

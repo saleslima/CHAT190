@@ -394,11 +394,21 @@ body {
 .message-bubble {
   max-width: 78%;
   border-radius: 14px;
-  padding: 6px 9px;
+  padding: 8px 10px;
   font-size: 13px;
   line-height: 1.35;
   word-wrap: break-word;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.message-sender-info {
+  font-size: 10px;
+  font-weight: 700;
+  margin-bottom: 2px;
+  opacity: 0.9;
 }
 
 .message-row.sent .message-bubble {
@@ -407,11 +417,19 @@ body {
   border-bottom-right-radius: 4px;
 }
 
+.message-row.sent .message-sender-info {
+  color: #a7f3d0;
+}
+
 .message-row.received .message-bubble {
   background: #ffffff;
   color: #111827;
   border-bottom-left-radius: 4px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.message-row.received .message-sender-info {
+  color: #059669;
 }
 
 .message-meta {

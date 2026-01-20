@@ -1,7 +1,23 @@
-const STORAGE_KEY_MESSAGES = "chatMessages";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getDatabase, ref, push, onValue, query, limitToLast } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDf-3RT8HR8htaehLq1o2i0dU0taWhwDxE",
+  authDomain: "chat190.firebaseapp.com",
+  databaseURL: "https://chat190-default-rtdb.firebaseio.com",
+  projectId: "chat190",
+  storageBucket: "chat190.firebasestorage.app",
+  messagingSenderId: "431619161317",
+  appId: "1:431619161317:web:9d8fc873d2aa63e857a80c"
+};
+
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
+const messagesRef = ref(database, 'messages');
+
 let messagesHistory = [];
 let messageIdCounter = Date.now();
-const messageChannel = new BroadcastChannel('chat_messages');
+let isFirstLoad = true;
 
 const chatOverlay = document.getElementById("chat-overlay");
 const floatingChatBtn = document.getElementById("floatingChatBtn");
@@ -23,47 +39,73 @@ const messageInput = document.getElementById("messageInput");
 const imageInput = document.getElementById("imageInput");
 
 const supervisorControls = document.getElementById("supervisorControls");
+const atendenteControls = document.getElementById("atendenteControls");
 const targetSelect = document.getElementById("targetSelect");
+const supervisorTypeSelect = document.getElementById("supervisorTypeSelect");
 const chatUserLabel = document.getElementById("chatUserLabel");
+const passwordHint = document.getElementById("passwordHint");
 
 let currentUser = null;
 let selectedRole = null;
 
-const SUPERVISOR_PASSWORD = "supervisor123";
+const SUPERVISOR_PASSWORDS = {
+  supervisao_civil: "superciv",
+  supervisao_militar: "supermil"
+};
 
-// Listen for messages from other tabs and same tab
-function setupStorageListener() {
-  messageChannel.onmessage = (event) => {
-    handleIncomingMessage(event.data);
-  };
+// Listen for messages from Firebase
+function setupFirebaseListener() {
+  const messagesQuery = query(messagesRef, limitToLast(100));
+  
+  onValue(messagesQuery, (snapshot) => {
+    if (!currentUser) return;
+    
+    const messages = [];
+    snapshot.forEach((childSnapshot) => {
+      messages.push({
+        id: childSnapshot.key,
+        ...childSnapshot.val()
+      });
+    });
+    
+    if (isFirstLoad) {
+      // On first load, just display relevant messages
+      messagesHistory = messages;
+      displayRelevantMessages();
+      isFirstLoad = false;
+    } else {
+      // For new messages, check if they should trigger notification
+      const newMessages = messages.filter(msg => 
+        !messagesHistory.find(m => m.id === msg.id || (m.id && m.id.startsWith('temp_')))
+      );
+      
+      messagesHistory = messages;
+      
+      newMessages.forEach(message => {
+        // Only display if it's from someone else and relevant
+        if (message.from !== currentUser.pa && shouldReceiveMessage(message)) {
+          displayMessage(message);
+          showChatOverlay();
+        }
+      });
+    }
+  });
 }
 
-// Send a message to other tabs via BroadcastChannel
-function sendMessageToOtherTabs(messageData) {
+// Send a message to Firebase
+async function sendMessageToFirebase(messageData) {
   try {
-    const messageWithId = {
+    const messageWithTimestamp = {
       ...messageData,
-      id: `${currentUser.pa}_${messageIdCounter++}`,
       timestamp: new Date().toISOString()
     };
-    messageChannel.postMessage(messageWithId);
+    const result = await push(messagesRef, messageWithTimestamp);
+    console.log("Mensagem salva no banco de dados com sucesso:", result.key);
+    return result;
   } catch (err) {
-    console.error("Error sending message:", err);
-  }
-}
-
-// Handle incoming message from another tab
-function handleIncomingMessage(message) {
-  if (!currentUser) return;
-
-  // Don't process our own messages
-  if (message.from === currentUser.pa) return;
-
-  const shouldReceive = shouldReceiveMessage(message);
-  if (shouldReceive) {
-    addMessageToHistory(message);
-    displayMessage(message);
-    showChatOverlay();
+    console.error("Erro ao salvar mensagem no banco de dados:", err);
+    alert("Erro ao enviar mensagem. Por favor, tente novamente.");
+    throw err;
   }
 }
 
@@ -71,13 +113,15 @@ function handleIncomingMessage(message) {
 function shouldReceiveMessage(message) {
   if (!currentUser) return false;
 
-  // If message is from atendente, all supervisors should receive
-  if (message.fromRole === "atendente" && currentUser.role === "supervisao") {
-    return true;
+  // If message is from atendente to specific supervisor type
+  if (message.fromRole === "atendente") {
+    if (message.supervisorType === currentUser.role) {
+      return true;
+    }
   }
 
   // If message is from supervisor to specific target
-  if (message.fromRole === "supervisao") {
+  if (message.fromRole === "supervisao_civil" || message.fromRole === "supervisao_militar") {
     if (message.target === "all") {
       // All logged in users receive
       return true;
@@ -90,32 +134,7 @@ function shouldReceiveMessage(message) {
   return false;
 }
 
-// Save messages to localStorage
-function saveMessages() {
-  try {
-    localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messagesHistory));
-  } catch (err) {
-    console.error("Error saving messages:", err);
-  }
-}
 
-// Load messages from localStorage
-function loadMessages() {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_MESSAGES);
-    if (stored) {
-      messagesHistory = JSON.parse(stored);
-    }
-  } catch (err) {
-    console.error("Error loading messages:", err);
-  }
-}
-
-// Add message to history
-function addMessageToHistory(message) {
-  messagesHistory.push(message);
-  saveMessages();
-}
 
 // Display a message in the UI
 function displayMessage(message) {
@@ -182,10 +201,15 @@ profileItems.forEach((item) => {
     selectedRole = item.dataset.role;
     detailsSection.classList.remove("hidden");
 
-    if (selectedRole === "supervisao") {
+    if (selectedRole === "supervisao_civil") {
       supervisorPasswordSection.classList.remove("hidden");
+      passwordHint.textContent = "Senha: superciv";
+    } else if (selectedRole === "supervisao_militar") {
+      supervisorPasswordSection.classList.remove("hidden");
+      passwordHint.textContent = "Senha: supermil";
     } else {
       supervisorPasswordSection.classList.add("hidden");
+      passwordHint.textContent = "";
     }
   });
 });
@@ -205,13 +229,12 @@ startChatBtn.addEventListener("click", () => {
     return;
   }
 
-  if (selectedRole === "supervisao") {
+  if (selectedRole === "supervisao_civil" || selectedRole === "supervisao_militar") {
     const password = supervisorPasswordInput.value.trim();
-    if (password !== SUPERVISOR_PASSWORD) {
-      alert("Senha de supervisão incorreta.");
+    if (password !== SUPERVISOR_PASSWORDS[selectedRole]) {
+      alert("Senha incorreta.");
       return;
     }
-    // Hide password section after successful login
     supervisorPasswordSection.classList.add("hidden");
   }
 
@@ -221,21 +244,24 @@ startChatBtn.addEventListener("click", () => {
     role: selectedRole,
   };
 
-  chatUserLabel.textContent = `P.A: ${pa} • ${name}`;
+  const roleLabel = selectedRole === "atendente" ? "Atendente" : 
+                    selectedRole === "supervisao_civil" ? "Superv Civil" : "Superv Militar";
+  chatUserLabel.textContent = `P.A: ${pa} • ${name} • ${roleLabel}`;
 
   userSetup.classList.add("hidden");
   chatContent.classList.remove("hidden");
 
-  if (selectedRole === "supervisao") {
+  if (selectedRole === "supervisao_civil" || selectedRole === "supervisao_militar") {
     supervisorControls.classList.remove("hidden");
+    atendenteControls.classList.add("hidden");
     updateTargetSelect();
-  } else {
+  } else if (selectedRole === "atendente") {
     supervisorControls.classList.add("hidden");
+    atendenteControls.classList.remove("hidden");
   }
 
-  loadMessages();
   displayRelevantMessages();
-  setupStorageListener();
+  setupFirebaseListener();
 });
 
 // Display relevant messages for current user
@@ -279,7 +305,7 @@ function updateTargetSelect() {
 messageForm.addEventListener("submit", async (e) => {
   e.preventDefault();
 
-  const text = messageInput.value.trim();
+  const text = messageInput.value.trim().toUpperCase();
   const imageFile = imageInput.files[0];
   let imageData = null;
 
@@ -293,31 +319,38 @@ messageForm.addEventListener("submit", async (e) => {
 
   const messageData = {
     from: currentUser.pa,
-    fromName: currentUser.name,
+    fromName: currentUser.name.toUpperCase(),
     fromRole: currentUser.role,
     text: text || "",
     image: imageData,
   };
 
   // For supervisor, set target
-  if (currentUser.role === "supervisao") {
+  if (currentUser.role === "supervisao_civil" || currentUser.role === "supervisao_militar") {
     messageData.target = targetSelect.value;
-  } else {
-    // Atendente messages go to all supervisors
-    messageData.target = "supervisao";
+  } else if (currentUser.role === "atendente") {
+    // Atendente messages go to selected supervisor type
+    messageData.supervisorType = supervisorTypeSelect.value;
   }
 
-  // Display own message immediately
-  const displayData = {
+  // Add timestamp and display immediately
+  const messageWithId = {
     ...messageData,
-    id: `${currentUser.pa}_${messageIdCounter++}`,
-    timestamp: new Date().toISOString(),
+    id: `temp_${Date.now()}`,
+    timestamp: new Date().toISOString()
   };
-  addMessageToHistory(displayData);
-  displayMessage(displayData);
-
-  // Send to other tabs
-  sendMessageToOtherTabs(messageData);
+  
+  // Display sent message immediately
+  displayMessage(messageWithId);
+  messagesHistory.push(messageWithId);
+  
+  // Send to Firebase and wait for confirmation
+  try {
+    await sendMessageToFirebase(messageData);
+    console.log("Mensagem enviada e salva:", messageData);
+  } catch (err) {
+    console.error("Falha ao enviar mensagem:", err);
+  }
 
   messageInput.value = "";
   imageInput.value = "";

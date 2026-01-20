@@ -38,7 +38,8 @@
             <span class="field-label">Perfil</span>
             <div class="profile-list">
               <button type="button" class="profile-item" data-role="atendente">Atendente</button>
-              <button type="button" class="profile-item" data-role="supervisao">Supervisão</button>
+              <button type="button" class="profile-item" data-role="supervisao_civil">Superv Civil</button>
+              <button type="button" class="profile-item" data-role="supervisao_militar">Superv Militar</button>
             </div>
           </div>
 
@@ -60,9 +61,10 @@
                 id="supervisorPassword"
                 type="password"
                 class="text-input"
-                placeholder="Digite a senha de supervisão"
+                placeholder="Digite a senha"
                 autocomplete="off"
               />
+              <p class="field-hint" id="passwordHint"></p>
             </div>
 
             <button id="startChatBtn" class="primary-btn">Entrar no chat</button>
@@ -73,6 +75,13 @@
           <div id="supervisorControls" class="supervisor-controls hidden">
             <label class="field-label" for="targetSelect">Enviar para</label>
             <select id="targetSelect" class="select-input"></select>
+          </div>
+          <div id="atendenteControls" class="supervisor-controls hidden">
+            <label class="field-label" for="supervisorTypeSelect">Tipo de Supervisão</label>
+            <select id="supervisorTypeSelect" class="select-input">
+              <option value="supervisao_civil">Superv Civil</option>
+              <option value="supervisao_militar">Superv Militar</option>
+            </select>
           </div>
           <div id="messagesContainer" class="messages-container"></div>
 

@@ -1,5 +1,12 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, push, onValue, query, limitToLast } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getDatabase,
+  ref,
+  push,
+  onValue,
+  query,
+  limitToLast
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDf-3RT8HR8htaehLq1o2i0dU0taWhwDxE",
@@ -14,6 +21,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const database = getDatabase(app);
 const messagesRef = ref(database, 'messages');
+console.log("Firebase initialized successfully");
 
 let messagesHistory = [];
 let messageIdCounter = Date.now();
@@ -22,6 +30,7 @@ let isFirstLoad = true;
 const chatOverlay = document.getElementById("chat-overlay");
 const floatingChatBtn = document.getElementById("floatingChatBtn");
 const chatMinimizeBtn = document.getElementById("chatMinimizeBtn");
+const logoutBtn = document.getElementById("logoutBtn");
 const userSetup = document.getElementById("userSetup");
 const chatContent = document.getElementById("chatContent");
 const detailsSection = document.getElementById("detailsSection");
@@ -203,10 +212,10 @@ profileItems.forEach((item) => {
 
     if (selectedRole === "supervisao_civil") {
       supervisorPasswordSection.classList.remove("hidden");
-      passwordHint.textContent = "Senha: superciv";
+      passwordHint.textContent = "Senha: SUPERCIV";
     } else if (selectedRole === "supervisao_militar") {
       supervisorPasswordSection.classList.remove("hidden");
-      passwordHint.textContent = "Senha: supermil";
+      passwordHint.textContent = "Senha: SUPERMIL";
     } else {
       supervisorPasswordSection.classList.add("hidden");
       passwordHint.textContent = "";
@@ -231,8 +240,9 @@ startChatBtn.addEventListener("click", () => {
 
   if (selectedRole === "supervisao_civil" || selectedRole === "supervisao_militar") {
     const password = supervisorPasswordInput.value.trim();
-    if (password !== SUPERVISOR_PASSWORDS[selectedRole]) {
-      alert("Senha incorreta.");
+    // Verifica a senha ignorando maiúsculas/minúsculas para evitar erros
+    if (password.toLowerCase() !== SUPERVISOR_PASSWORDS[selectedRole].toLowerCase()) {
+      alert("Senha incorreta. A senha correta é: " + SUPERVISOR_PASSWORDS[selectedRole].toUpperCase());
       return;
     }
     supervisorPasswordSection.classList.add("hidden");
@@ -250,6 +260,7 @@ startChatBtn.addEventListener("click", () => {
 
   userSetup.classList.add("hidden");
   chatContent.classList.remove("hidden");
+  logoutBtn.classList.remove("hidden");
 
   if (selectedRole === "supervisao_civil" || selectedRole === "supervisao_militar") {
     supervisorControls.classList.remove("hidden");
@@ -262,6 +273,33 @@ startChatBtn.addEventListener("click", () => {
 
   displayRelevantMessages();
   setupFirebaseListener();
+});
+
+// Logout
+logoutBtn.addEventListener("click", () => {
+  // Reset user state
+  currentUser = null;
+  selectedRole = null;
+  messagesHistory = [];
+  
+  // Clear UI
+  messagesContainer.innerHTML = "";
+  chatUserLabel.textContent = "";
+  
+  // Reset inputs
+  userNameInput.value = "";
+  supervisorPasswordInput.value = "";
+  messageInput.value = "";
+  
+  // Reset views
+  chatContent.classList.add("hidden");
+  userSetup.classList.remove("hidden");
+  logoutBtn.classList.add("hidden");
+  detailsSection.classList.add("hidden");
+  supervisorPasswordSection.classList.add("hidden");
+  
+  // Deselect profile items
+  profileItems.forEach(item => item.classList.remove("active"));
 });
 
 // Display relevant messages for current user

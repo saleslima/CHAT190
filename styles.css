@@ -121,6 +121,12 @@ body {
   color: #f9fafb;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .chat-title-group {
   display: flex;
   flex-direction: column;
@@ -182,46 +188,56 @@ body {
 .profile-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   margin-top: 4px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .profile-item {
   width: 100%;
-  border-radius: 10px;
-  border: 1px solid #e5e7eb;
-  padding: 8px 10px;
+  border: none;
+  border-bottom: 1px solid #f3f4f6;
+  padding: 12px 14px;
   font-size: 13px;
   text-align: left;
-  background: #f9fafb;
-  color: #111827;
+  background: #ffffff;
+  color: #374151;
   display: flex;
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.1s ease;
+  transition: background 0.15s ease, color 0.15s ease;
+  border-radius: 0;
+}
+
+.profile-item:last-child {
+  border-bottom: none;
 }
 
 .profile-item::after {
   content: "›";
-  font-size: 14px;
+  font-size: 16px;
   color: #9ca3af;
+  font-weight: 300;
 }
 
 .profile-item:hover {
-  background: #f1f5f9;
-  border-color: #d1d5db;
+  background: #f9fafb;
 }
 
 .profile-item.active {
-  border-color: #059669;
   background: #ecfdf5;
-  color: #064e3b;
-  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.25);
+  color: #065f46;
+  font-weight: 500;
+}
+
+.profile-item.active::after {
+  color: #059669;
+  content: "✓";
+  font-size: 14px;
 }
 
 .details-section.hidden {

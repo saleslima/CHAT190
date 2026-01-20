@@ -33,6 +33,7 @@ let messageIdCounter = Date.now();
 let isFirstLoad = true;
 let activeUsers = {};
 let usersUnsubscribe = null;
+let messagesUnsubscribe = null;
 
 const chatOverlay = document.getElementById("chat-overlay");
 const floatingChatBtn = document.getElementById("floatingChatBtn");
@@ -114,9 +115,11 @@ function isMessageRelevant(message) {
 
 // Listen for messages from Firebase
 function setupFirebaseListener() {
+  if (messagesUnsubscribe) messagesUnsubscribe();
+
   const messagesQuery = query(messagesRef, limitToLast(100));
   
-  onValue(messagesQuery, (snapshot) => {
+  messagesUnsubscribe = onValue(messagesQuery, (snapshot) => {
     if (!currentUser) return;
     
     const messages = [];
@@ -143,11 +146,9 @@ function setupFirebaseListener() {
       messagesHistory = validMessages;
       
       newMessages.forEach(message => {
-        // Only display if it's from someone else and relevant
-        // Note: isMessageRelevant handles "sent by me" logic, so we keep the from check 
-        // to avoid displaying double messages (since we push locally)
         if (message.from !== currentUser.pa && isMessageRelevant(message)) {
            displayMessage(message);
+           // If message is received, ensure chat is open/visible to user
            showChatOverlay();
         }
       });
@@ -309,7 +310,78 @@ profileItems.forEach((item) => {
   });
 });
 
-// Start chat
+async function enterChat(name, pa, role) {
+  currentUser = { name, pa, role };
+  selectedRole = role;
+
+  // Save session for reload persistence
+  localStorage.setItem('chatUserSession', JSON.stringify({ name, pa, role }));
+
+  // Register user presence
+  const userRef = ref(database, `users/${pa}`);
+  // Overwrite presence (handles re-login on refresh)
+  await set(userRef, {
+    name,
+    role,
+    loginTime: Date.now()
+  });
+  
+  // Remove user on disconnect
+  onDisconnect(userRef).remove();
+  
+  // Attempt clean removal on window close
+  window.addEventListener('beforeunload', () => {
+    // We only remove if explicitly quitting, but for refresh we rely on the new session overwriting.
+    // However, to keep active list clean, we remove. The next load will re-add.
+    remove(userRef);
+  });
+
+  const roleLabel = role === "atendente" ? "Atendente" : 
+                    role === "supervisao_civil" ? "Sup. Civil" : 
+                    role === "supervisao_cobom" ? "Sup. COBOM" : "Sup. Militar";
+  chatUserLabel.textContent = `P.A: ${pa} • ${name} • ${roleLabel}`;
+
+  userSetup.classList.add("hidden");
+  chatContent.classList.remove("hidden");
+  clearChatBtn.classList.remove("hidden");
+  
+  // Ensure supervisor password section is hidden if it was open
+  supervisorPasswordSection.classList.add("hidden");
+
+  if (["supervisao_civil", "supervisao_militar", "supervisao_cobom"].includes(role)) {
+    supervisorControls.classList.remove("hidden");
+    atendenteControls.classList.add("hidden");
+    setupUsersListener(); 
+  } else if (role === "atendente") {
+    supervisorControls.classList.add("hidden");
+    atendenteControls.classList.remove("hidden");
+  }
+
+  // Ensure chat is visible (in case it was minimized or hidden)
+  showChatOverlay();
+
+  displayRelevantMessages();
+  setupFirebaseListener();
+}
+
+// Check for saved session on load
+window.addEventListener('load', async () => {
+  const savedSession = localStorage.getItem('chatUserSession');
+  if (savedSession) {
+    try {
+      const session = JSON.parse(savedSession);
+      if (session.name && session.pa && session.role) {
+        // Auto-login
+        await enterChat(session.name, session.pa, session.role);
+      }
+    } catch (e) {
+      console.error("Erro ao restaurar sessão:", e);
+      localStorage.removeItem('chatUserSession');
+    }
+  }
+});
+
+// Start chat manually
 startChatBtn.addEventListener("click", async () => {
   const name = userNameInput.value.trim();
   const pa = userPAInput.value.trim();
@@ -348,54 +420,15 @@ startChatBtn.addEventListener("click", async () => {
       alert("Senha incorreta. A senha correta é: " + SUPERVISOR_PASSWORDS[selectedRole].toUpperCase());
       return;
     }
-    supervisorPasswordSection.classList.add("hidden");
   }
 
-  currentUser = {
-    name,
-    pa,
-    role: selectedRole,
-  };
-
-  // Register user presence
-  const userRef = ref(database, `users/${pa}`);
-  await set(userRef, {
-    name,
-    role: selectedRole,
-    loginTime: Date.now()
-  });
-  
-  // Remove user on disconnect
-  onDisconnect(userRef).remove();
-  
-  // Attempt clean removal on window close
-  window.addEventListener('beforeunload', () => {
-    remove(userRef);
-  });
-
-  const roleLabel = selectedRole === "atendente" ? "Atendente" : 
-                    selectedRole === "supervisao_civil" ? "Sup. Civil" : 
-                    selectedRole === "supervisao_cobom" ? "Sup. COBOM" : "Sup. Militar";
-  chatUserLabel.textContent = `P.A: ${pa} • ${name} • ${roleLabel}`;
-
-  userSetup.classList.add("hidden");
-  chatContent.classList.remove("hidden");
-  clearChatBtn.classList.remove("hidden");
-
-  if (["supervisao_civil", "supervisao_militar", "supervisao_cobom"].includes(selectedRole)) {
-    supervisorControls.classList.remove("hidden");
-    atendenteControls.classList.add("hidden");
-    setupUsersListener(); 
-  } else if (selectedRole === "atendente") {
-    supervisorControls.classList.add("hidden");
-    atendenteControls.classList.remove("hidden");
-  }
-
-  displayRelevantMessages();
-  setupFirebaseListener();
+  await enterChat(name, pa, selectedRole);
 });
 
 function logout() {
+  // Clear stored session
+  localStorage.removeItem('chatUserSession');
+
   if (currentUser) {
     try {
       remove(ref(database, `users/${currentUser.pa}`));
@@ -406,13 +439,18 @@ function logout() {
     usersUnsubscribe();
     usersUnsubscribe = null;
   }
-  activeUsers = {};
+  if (messagesUnsubscribe) {
+    messagesUnsubscribe();
+    messagesUnsubscribe = null;
+  }
   
+  activeUsers = {};
   currentUser = null;
   selectedRole = null;
   messagesHistory = [];
   messagesContainer.innerHTML = "";
   chatUserLabel.textContent = "";
+  isFirstLoad = true; // Reset for next login
   
   userNameInput.value = "";
   supervisorPasswordInput.value = "";
@@ -426,6 +464,8 @@ function logout() {
   supervisorPasswordSection.classList.add("hidden");
   
   profileItems.forEach(item => item.classList.remove("active"));
+  
+  showChatOverlay(); // Ensure overlay is visible for login form
 }
 
 chatCloseBtn.addEventListener("click", logout);

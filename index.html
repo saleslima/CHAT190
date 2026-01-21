@@ -2,8 +2,9 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <title>Chat</title>
+  <title>Chat Profissional</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -93,8 +94,17 @@
 
         <div id="chatContent" class="chat-content hidden">
           <div id="supervisorControls" class="supervisor-controls hidden">
-            <label class="field-label" for="targetSelect">Enviar para</label>
-            <select id="targetSelect" class="select-input"></select>
+            <div id="queueSection" class="queue-section">
+              <div class="queue-header">
+                <span class="queue-label">Mensagens / Atendimentos</span>
+                <button id="resetFilterBtn" class="reset-btn hidden" title="Voltar para visão geral">Voltar / Novo</button>
+              </div>
+              <div id="conversationQueue" class="conversation-queue"></div>
+            </div>
+            <div class="control-row">
+              <label class="field-label" for="targetSelect">Enviar para</label>
+              <select id="targetSelect" class="select-input"></select>
+            </div>
           </div>
           <div id="atendenteControls" class="supervisor-controls hidden">
             <label class="field-label" for="supervisorTypeSelect">Tipo de Supervisão</label>

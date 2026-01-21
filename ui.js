@@ -139,6 +139,13 @@ export function updateTargetSelect() {
   });
   
   if (state.chatFilter) {
+    // Ensure the filtered user is available in the dropdown even if offline
+    if (!elements.targetSelect.querySelector(`option[value="${state.chatFilter}"]`)) {
+       const option = document.createElement('option');
+       option.value = state.chatFilter;
+       option.textContent = `P.A ${state.chatFilter}`;
+       elements.targetSelect.appendChild(option);
+    }
     elements.targetSelect.value = state.chatFilter;
     elements.targetSelect.disabled = true;
   } else {
@@ -180,6 +187,15 @@ export function setChatFilter(pa) {
   if (pa) {
     // Reply Mode
     elements.resetFilterBtn.classList.remove('hidden');
+    
+    // Ensure option exists before setting value (for offline users)
+    if (!elements.targetSelect.querySelector(`option[value="${pa}"]`)) {
+       const option = document.createElement('option');
+       option.value = pa;
+       option.textContent = `P.A ${pa}`;
+       elements.targetSelect.appendChild(option);
+    }
+
     elements.targetSelect.value = pa;
     elements.targetSelect.disabled = true;
     
@@ -201,8 +217,9 @@ export function setChatFilter(pa) {
   }
   
   // Refresh messages to show only filtered
-  const { displayRelevantMessages } = require('./chat.js'); // Circular dependency handling
-  displayRelevantMessages();
+  import('./chat.js').then(module => {
+    module.displayRelevantMessages();
+  }).catch(err => console.error("Failed to refresh messages:", err));
 }
 
 export function resetLoginForm() {
